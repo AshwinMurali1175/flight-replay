@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <title>Flight Path Replay</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #controls {
+            background: white;
+            padding: 10px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            position: relative;
+            z-index: 1000;
+            box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        #map {
+            flex: 1;
+            width: 100%;
+        }
+
+        #info {
+            text-align: center;
+            padding: 10px;
+            font-size: 16px;
+            background: white;
+            box-shadow: 0px -2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        .aircraft-icon {
+            width: 40px;
+            height: 40px;
+            transform-origin: center;
+            transition: transform 0.2s linear;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button onclick="play()">Play</button>
+        <button onclick="pause()">Pause</button>
+        <button onclick="setSpeed(1)">1x</button>
+        <button onclick="setSpeed(5)">5x</button>
+        <button onclick="setSpeed(10)">10x</button>
+    </div>
+    
+    <div id="map"></div>
+
+    <p id="info">Time: -- | Coordinates: -- | Altitude: --</p>
+
+    <script>
+        // Initialize Map
+        const map = L.map('map').setView([0, 0], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        let flightData = [];
+        let currentIndex = 0;
+        let replaySpeed = 1000;
+        let replayInterval = null;
+        let aircraftMarker = null;
+        let aircraftIconElement = null;
+        let bluePath = null;
+        let redPath = L.polyline([], { color: 'red', weight: 3 }).addTo(map); // Red trail
+
+        // Load Flight Data
+        async function loadFlightData() {
+            const response = await fetch('/flight_data.json');
+            flightData = await response.json();
+
+            if (flightData.length === 0) {
+                alert('No flight data found!');
+                return;
+            }
+
+            // Center map on the first point
+            map.setView([flightData[0].lat, flightData[0].lon], 15);
+
+            // Draw initial flight path in blue
+            const coordinates = flightData.map(point => [point.lat, point.lon]);
+            bluePath = L.polyline(coordinates, { color: 'blue', weight: 3 }).addTo(map);
+
+            // Add aircraft marker with custom HTML icon
+            aircraftIconElement = document.createElement('img');
+            aircraftIconElement.src = 'https://upload.wikimedia.org/wikipedia/commons/1/1e/Airplane_silhouette.png';
+            aircraftIconElement.className = 'aircraft-icon';
+
+            const aircraftIcon = L.divIcon({
+                className: '',
+                html: aircraftIconElement.outerHTML,
+                iconSize: [40, 40],
+                iconAnchor: [20, 20],
+            });
+
+            aircraftMarker = L.marker([flightData[0].lat, flightData[0].lon], { icon: aircraftIcon }).addTo(map);
+
+            // Update initial info
+            updateInfo(flightData[0]);
+        }
+
+        function updateMarker() {
+            if (currentIndex < flightData.length) {
+                const { lat, lon, time, heading, alt } = flightData[currentIndex];
+
+                aircraftMarker.setLatLng([lat, lon]);
+                map.panTo([lat, lon]);
+                updateInfo(flightData[currentIndex]);
+
+                // Rotate aircraft icon based on heading
+                const imgElement = aircraftMarker.getElement().querySelector('img');
+                if (imgElement && heading !== undefined) {
+                    imgElement.style.transform = `rotate(${heading}deg)`; // Fixing the rotation
+                }
+
+                // Move the trail from blue to red
+                const traveledPath = flightData.slice(0, currentIndex + 1).map(point => [point.lat, point.lon]);
+                redPath.setLatLngs(traveledPath);
+
+                // Remove traveled portion from the blue path
+                const remainingPath = flightData.slice(currentIndex).map(point => [point.lat, point.lon]);
+                bluePath.setLatLngs(remainingPath);
+
+                currentIndex++;
+            } else {
+                pause();
+            }
+        }
+
+        function updateInfo(data) {
+            const formattedTime = data.time || "--";
+            const altitude = data.alt !== undefined ? `${data.alt} m` : "--"; // Accessing alt instead of altitude
+            document.getElementById("info").innerText = `Time: ${formattedTime} | Coordinates: (${data.lat}, ${data.lon}) | Altitude: ${altitude}`;
+        }
+
+        function play() {
+            if (!replayInterval) {
+                replayInterval = setInterval(updateMarker, replaySpeed);
+            }
+        }
+
+        function pause() {
+            clearInterval(replayInterval);
+            replayInterval = null;
+        }
+
+        function setSpeed(speed) {
+            replaySpeed = 1000 / speed;
+            if (replayInterval) {
+                pause();
+                play();
+            }
+        }
+
+        loadFlightData();
+    </script>
+</body>
+</html>
+
